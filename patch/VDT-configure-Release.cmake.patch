@@ -1,0 +1,11 @@
+--- VDT-configure-Release.cmake	2025-10-17 13:18:53
++++ VDT-configure-Release.cmake.change	2025-10-17 13:16:44
+@@ -1,7 +1,7 @@
+ 
+ cmake_minimum_required(VERSION ${CMAKE_VERSION}) # this file comes with cmake
+ 
+-set(command "/opt/homebrew/bin/cmake;-DSSE=OFF;-DCMAKE_BUILD_TYPE=Release;-DCMAKE_C_COMPILER=/usr/bin/cc;-DCMAKE_CXX_COMPILER=/usr/bin/c++;-DCMAKE_C_FLAGS= -m64 -pipe -W -Wall -fsigned-char -fno-common -Qunused-arguments -pthread;-DCMAKE_CXX_FLAGS= -std=c++14 -Wc++11-narrowing -Wsign-compare -Wsometimes-uninitialized -Wconditional-uninitialized -Wheader-guard -Warray-bounds -Wcomment -Wtautological-compare -Wstrncat-size -Wloop-analysis -Wbool-conversion -m64 -pipe -W -Wall -Woverloaded-virtual -fsigned-char -fno-common -Qunused-arguments -pthread -stdlib=libc++ ;-DCMAKE_INSTALL_PREFIX=/Users/shoh/Install/inhouse/MuonToolkit/build/forRoot/build;-GNinja;-S;/Users/shoh/Install/inhouse/MuonToolkit/build/forRoot/build/VDT-prefix/src/VDT;-B;/Users/shoh/Install/inhouse/MuonToolkit/build/forRoot/build/VDT-prefix/src/VDT-build")
++set(command "/opt/homebrew/bin/cmake;-DSSE=OFF;-DCMAKE_BUILD_TYPE=Release;-DCMAKE_POLICY_DEFAULT_CMP0175=OLD;-DCMAKE_POLICY_VERSION_MINIMUM=3.5;-DCMAKE_C_COMPILER=/usr/bin/cc;-DCMAKE_CXX_COMPILER=/usr/bin/c++;-DCMAKE_C_FLAGS= -m64 -pipe -W -Wall -fsigned-char -fno-common -Qunused-arguments -pthread;-DCMAKE_CXX_FLAGS= -std=c++14 -Wc++11-narrowing -Wsign-compare -Wsometimes-uninitialized -Wconditional-uninitialized -Wheader-guard -Warray-bounds -Wcomment -Wtautological-compare -Wstrncat-size -Wloop-analysis -Wbool-conversion -m64 -pipe -W -Wall -Woverloaded-virtual -fsigned-char -fno-common -Qunused-arguments -pthread -stdlib=libc++ ;-DCMAKE_INSTALL_PREFIX=/Users/shoh/Install/inhouse/MuonToolkit/build/forRoot/build;-GNinja;-S;/Users/shoh/Install/inhouse/MuonToolkit/build/forRoot/build/VDT-prefix/src/VDT;-B;/Users/shoh/Install/inhouse/MuonToolkit/build/forRoot/build/VDT-prefix/src/VDT-build")
+ set(log_merged "")
+ set(log_output_on_failure "")
+ set(stdout_log "/Users/shoh/Install/inhouse/MuonToolkit/build/forRoot/build/VDT-prefix/src/VDT-stamp/VDT-configure-out.log")
