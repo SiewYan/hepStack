@@ -1,6 +1,8 @@
-# Physics Software Stack Installer
+# Particle Physics Software Stack Installer
 
 A comprehensive bash script to install ROOT, Geant4, and CLHEP for particle physics simulation and data analysis.
+
+For now.
 
 ## 🚀 Quick Start
 
