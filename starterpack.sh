@@ -286,16 +286,14 @@ install_root() {
         "-Dbuiltin_gsl=ON"
         "-Dbuiltin_fftw3=ON"
         "-Dbuiltin_cfitsio=ON"
-        "-Dbuiltin_openssl=ON"
         "-Droofit=ON"
         "-Dgdml=ON"
-        "-Dminuit2=ON"
     )
     
     # Platform-specific options
     case $PLATFORM in
         macos)
-            CMAKE_OPTIONS+=("-Dcocoa=ON" "-Dx11=OFF")
+            CMAKE_OPTIONS+=("-Dcocoa=ON" "-Dx11=OFF" "-Dbuiltin_openssl=ON")
             ;;
         *)
             CMAKE_OPTIONS+=("-Dx11=ON")
@@ -310,13 +308,13 @@ install_root() {
     # patch/intervention
     # Patch VDT's CMakeLists.txt if it exists
     # CMAKE issue
-    CMAKE_VDT="${BUILD_DIR}/forRoot/build/VDT-prefix/src/VDT-stamp/VDT-configure-Release.cmake"
-    if [ -f "${CMAKE_VDT}" ]; then
-        print_info "Patching VDT configuration..."
-	
-        #patch --dry-run --verbose ${CMAKE_VDT} < ${CWD}/patch/VDT-configure-Release.cmake.patch
-	patch ${CMAKE_VDT} < ${CWD}/patch/VDT-configure-Release.cmake.patch
-    fi
+    #CMAKE_VDT="${BUILD_DIR}/forRoot/build/VDT-prefix/src/VDT-stamp/VDT-configure-Release.cmake"
+    #if [ -f "${CMAKE_VDT}" ]; then
+    #    print_info "Patching VDT configuration..."
+    #
+    #    #patch --dry-run --verbose ${CMAKE_VDT} < ${CWD}/patch/VDT-configure-Release.cmake.patch
+    #    patch ${CMAKE_VDT} < ${CWD}/patch/VDT-configure-Release.cmake.patch
+    #fi
     
     ninja -j$NPROC
     ninja install
@@ -352,18 +350,7 @@ install_geant4() {
         "-DGEANT4_USE_SYSTEM_CLHEP=ON"
         "-DGEANT4_USE_SYSTEM_EXPAT=ON"
         "-DGEANT4_USE_SYSTEM_ZLIB=ON"
-	"-DGEANT4_USE_ROOT=ON"
     )
-    
-    # Platform-specific options
-    #case $PLATFORM in
-    #    macos)
-    #        CMAKE_OPTIONS+=("-DGEANT4_USE_OPENGL_X11=OFF")
-    #        ;;
-    #    *)
-    #        CMAKE_OPTIONS+=("-DGEANT4_USE_OPENGL_X11=ON")
-    #        ;;
-    #esac
     
     # Join array into string and execute
     cmake_build "$BUILD_DIR/$geant4_dir" "${CMAKE_OPTIONS[@]}"
