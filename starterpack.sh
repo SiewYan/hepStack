@@ -281,14 +281,10 @@ install_root() {
     # Build cmake options array
     CMAKE_OPTIONS=(
         "-DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX"
-	"-DCMAKE_POLICY_DEFAULT_CMP0175=OLD"
-	"-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
-        "-Dbuiltin_gsl=ON"
-        "-Dbuiltin_fftw3=ON"
-        "-Dbuiltin_cfitsio=ON"
-        "-Droofit=ON"
-        "-Dgdml=ON"
     )
+    
+    # is this needed?
+    # -Dbuiltin_fftw3=ON -Dbuiltin_cfitsio=ON -Droofit=ON -Dgdml=ON 
     
     # Platform-specific options
     case $PLATFORM in
@@ -299,6 +295,11 @@ install_root() {
             CMAKE_OPTIONS+=("-Dx11=ON")
             ;;
     esac
+
+    # CMAKE POLICY
+    if [ "$ROOT_VERSION" == "6.32.08" ]; then
+	CMAKE_OPTIONS+=( "-DCMAKE_POLICY_DEFAULT_CMP0175=OLD" "-DCMAKE_POLICY_VERSION_MINIMUM=3.5" )
+    fi
     
     # Join array into string and execute
     local cmake_cmd="cmake -G Ninja ${CMAKE_OPTIONS[@]} ../$root_dir"
@@ -307,7 +308,7 @@ install_root() {
 
     # patch/intervention
     # CMAKE issue
-    if [ "$GEANT4_VERSION" == "11.3.2" ]; then
+    if [ "$ROOT_VERSION" == "6.32.08" ]; then
 	CMAKE_VDT="${BUILD_DIR}/forRoot/build/VDT-prefix/src/VDT-stamp/VDT-configure-Release.cmake"
 	if [ -f "${CMAKE_VDT}" ]; then
             print_info "Patching VDT configuration..."
