@@ -1,0 +1,11 @@
+--- Geant4PackageCache.cmake	2025-10-17 21:00:38
++++ Geant4PackageCache.cmake.change	2025-10-17 21:00:31
+@@ -19,7 +19,7 @@
+ 
+ # EXPAT Build Time Settings
+ geant4_set_and_check_package_variable(EXPAT_INCLUDE_DIR "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include" PATH "Path to a file.")
+-geant4_set_and_check_package_variable(EXPAT_LIBRARY ""  "")
++#geant4_set_and_check_package_variable(EXPAT_LIBRARY ""  "")
+ 
+ # ZLIB Build Time Settings
+ geant4_set_and_check_package_variable(ZLIB_INCLUDE_DIR "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include" PATH "Path to a file.")

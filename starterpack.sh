@@ -306,15 +306,16 @@ install_root() {
     eval $cmake_cmd
 
     # patch/intervention
-    # Patch VDT's CMakeLists.txt if it exists
     # CMAKE issue
-    #CMAKE_VDT="${BUILD_DIR}/forRoot/build/VDT-prefix/src/VDT-stamp/VDT-configure-Release.cmake"
-    #if [ -f "${CMAKE_VDT}" ]; then
-    #    print_info "Patching VDT configuration..."
-    #
-    #    #patch --dry-run --verbose ${CMAKE_VDT} < ${CWD}/patch/VDT-configure-Release.cmake.patch
-    #    patch ${CMAKE_VDT} < ${CWD}/patch/VDT-configure-Release.cmake.patch
-    #fi
+    if [ "$GEANT4_VERSION" == "11.3.2" ]; then
+	CMAKE_VDT="${BUILD_DIR}/forRoot/build/VDT-prefix/src/VDT-stamp/VDT-configure-Release.cmake"
+	if [ -f "${CMAKE_VDT}" ]; then
+            print_info "Patching VDT configuration..."
+    
+            #patch --dry-run --verbose ${CMAKE_VDT} < ${CWD}/patch/VDT-configure-Release.cmake.patch
+            patch ${CMAKE_VDT} < ${CWD}/patch/VDT-configure-Release.cmake.patch
+	fi
+    fi
     
     ninja -j$NPROC
     ninja install
@@ -340,6 +341,16 @@ install_geant4() {
     fi
     
     cd "$geant4_dir"
+
+    
+    # bug for Geant4 10.7.3
+    if [ "$GEANT4_VERSION" == "10.7.3" ]; then
+	COLUMNSICC=${BUILD_DIR}/${geant4_dir}/source/analysis/g4tools/include/tools/wroot/columns.icc
+	if [ -f "${COLUMNSICC}" ]; then
+	    print_info "Patching ${COLUMNSICC} ..."
+	    patch ${COLUMNSICC} < ${CWD}/patch/columns.icc.patch
+	fi
+    fi
     
     # Build cmake options array
     CMAKE_OPTIONS=(
@@ -358,6 +369,16 @@ install_geant4() {
     add_to_shell "export GEANT4_DIR=\"$INSTALL_PREFIX\""
     add_to_shell "export GEANT4_INSTALL=\"$INSTALL_PREFIX\""
     add_to_shell "source \"\$GEANT4_DIR/bin/geant4.sh\""
+
+    # bug for Geant4 10.7.3
+    if [ "$GEANT4_VERSION" == "10.7.3" ]; then
+	GEANT4PACKAGECACHE=${CWD}/local/lib/Geant4-${GEANT4_VERSION}/Geant4PackageCache.cmake
+        if [ -f "${GEANT4PACKAGECACHE}" ]; then
+            print_info "Patching ${GEANT4PACKAGECACHE} ..."
+            patch ${GEANT4PACKAGECACHE} < ${CWD}/patch/Geant4PackageCache.cmake.patch
+        fi
+    fi
+
     
     print_success "Geant4 installed successfully"
 }
