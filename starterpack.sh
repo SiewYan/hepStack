@@ -354,15 +354,26 @@ install_geant4() {
     fi
     
     # Build cmake options array
+    # "-DGEANT4_USE_QT=ON"
     CMAKE_OPTIONS=(
         "-DGEANT4_BUILD_MULTITHREADED=ON"
 	"-DGEANT4_INSTALL_DATA=ON"
-	"-DGEANT4_USE_QT=ON"
 	"-DGEANT4_USE_OPENGL_X11=ON"
         "-DGEANT4_USE_SYSTEM_CLHEP=ON"
         "-DGEANT4_USE_SYSTEM_EXPAT=ON"
         "-DGEANT4_USE_SYSTEM_ZLIB=ON"
     )
+
+    # Platform-specific options
+    #case $PLATFORM in
+    #    macos)
+    #        CMAKE_OPTIONS+=("-DGEANT4_USE_QT=ON" "-DQt5_DIR=\"$(brew --prefix qt@5)/lib/cmake/Qt5\"")
+    #        ;;
+    #*)
+    #        CMAKE_OPTIONS+=("-DGEANT4_USE_QT=ON")
+    #        ;;
+    #esac
+
     
     # Join array into string and execute
     cmake_build "$BUILD_DIR/$geant4_dir" "${CMAKE_OPTIONS[@]}"
