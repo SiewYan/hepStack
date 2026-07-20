@@ -113,6 +113,9 @@ CHECKMATE_VERSION=$(read_config "versions" "checkmate")
 CONTUR_VERSION=$(read_config "versions" "contur")
 PYHF_VERSION=$(read_config "versions" "pyhf")
 SPEY_VERSION=$(read_config "versions" "spey")
+MAMBA_VERSION=$(read_config "python" "miniforge")
+PYTHON_VERSION=$(read_config "python" "python")
+PYTHON_PACKAGES=$(read_config "python" "packages")
 
 # Default configuration
 CWD=$(pwd)
@@ -137,6 +140,7 @@ INSTALL_CHECKMATE="${INSTALL_CHECKMATE:-1}"
 INSTALL_CONTUR="${INSTALL_CONTUR:-1}"
 INSTALL_PYHF="${INSTALL_PYHF:-1}"
 INSTALL_SPEY="${INSTALL_SPEY:-1}"
+INSTALL_MAMBA="${INSTALL_MAMBA:-1}"
 
 # Skip the interactive menu and install per the current flags (set by -y/--all)
 ASSUME_YES="${ASSUME_YES:-0}"
@@ -147,8 +151,11 @@ FORCE_REINSTALL="${FORCE_REINSTALL:-0}"
 # Package registry — install order. The flag var is INSTALL_<KEY> and the
 # version var is <KEY>_VERSION for every entry (bash 3.2: parallel arrays,
 # no associative arrays).
-PKG_KEYS=(CLHEP ROOT GEANT4 LHAPDF PYTHIA8 DELPHES MADGRAPH WHIZARD CALCHEP HERWIG MADANALYSIS RIVET CHECKMATE PYHF SPEY CONTUR)
-PKG_LABELS=("CLHEP" "ROOT" "Geant4" "LHAPDF" "Pythia8" "Delphes" "MadGraph" "WHIZARD" "CalcHEP" "Herwig7" "MadAnalysis5" "Rivet" "CheckMATE" "pyhf" "spey" "Contur")
+PKG_KEYS=(MAMBA CLHEP ROOT GEANT4 LHAPDF PYTHIA8 DELPHES MADGRAPH WHIZARD CALCHEP HERWIG MADANALYSIS RIVET CHECKMATE PYHF SPEY CONTUR)
+PKG_LABELS=("mamba/Python" "CLHEP" "ROOT" "Geant4" "LHAPDF" "Pythia8" "Delphes" "MadGraph" "WHIZARD" "CalcHEP" "Herwig7" "MadAnalysis5" "Rivet" "CheckMATE" "pyhf" "spey" "Contur")
+
+# Miniforge lives under the prefix; its bin provides python3 for every build.
+MAMBA_ROOT="$INSTALL_PREFIX/miniforge3"
 
 # Get dependencies for platform
 get_deps() {
@@ -257,6 +264,7 @@ check_command() {
 # install) for a package KEY. Empty for pip packages (detected via the venv).
 pkg_marker() {
     case "$1" in
+        MAMBA)       echo "$INSTALL_PREFIX/miniforge3/bin/mamba" ;;
         CLHEP)       echo "$INSTALL_PREFIX/include/CLHEP" ;;
         ROOT)        echo "$INSTALL_PREFIX/bin/root" ;;
         GEANT4)      echo "$INSTALL_PREFIX/bin/geant4-config" ;;
@@ -345,6 +353,52 @@ cmake_build() {
 }
 
 # Installation functions
+# Miniforge (mamba) provides the Python used by every build in this stack.
+# Used strictly as the Python provider: python packages come from mamba, but
+# C++/Fortran compilers stay system-side to avoid conda ABI mismatches.
+install_mamba() {
+    already_installed MAMBA "Miniforge/mamba" && {
+        export PATH="$MAMBA_ROOT/bin:$PATH"
+        return 0
+    }
+    print_info "Installing Miniforge (mamba) ${MAMBA_VERSION:-latest}..."
+
+    cd "$BUILD_DIR"
+
+    # Installer name: Miniforge3-<OS>-<arch>.sh, e.g. Miniforge3-Darwin-arm64.sh
+    local os arch installer url
+    os=$(uname -s)
+    arch=$(uname -m)
+    installer="Miniforge3-$os-$arch.sh"
+
+    if [ -z "$MAMBA_VERSION" ] || [ "$MAMBA_VERSION" = "latest" ]; then
+        url="https://github.com/conda-forge/miniforge/releases/latest/download/$installer"
+    else
+        url="https://github.com/conda-forge/miniforge/releases/download/$MAMBA_VERSION/Miniforge3-$MAMBA_VERSION-$os-$arch.sh"
+    fi
+
+    if [ ! -f "$installer" ]; then
+        download_file "$url" "$installer"
+    fi
+
+    # -b: batch (no license prompt), -p: prefix. Keep it out of ~/.bashrc's
+    # conda init — we manage PATH ourselves.
+    bash "$installer" -b -p "$MAMBA_ROOT"
+
+    # Pin python and install the packages the builds need.
+    print_info "Installing Python $PYTHON_VERSION + build packages into miniforge base..."
+    "$MAMBA_ROOT/bin/mamba" install -y "python=$PYTHON_VERSION" $PYTHON_PACKAGES
+
+    # Make this python the one every subsequent build finds first.
+    export PATH="$MAMBA_ROOT/bin:$PATH"
+
+    add_to_shell "# hepStack python (miniforge): "
+    add_to_shell "export PATH=\"$MAMBA_ROOT/bin:\$PATH\""
+
+    print_info "Python in use: $("$MAMBA_ROOT/bin/python3" --version 2>&1) at $MAMBA_ROOT/bin/python3"
+    print_success "Miniforge/mamba installed successfully"
+}
+
 install_clhep() {
     already_installed CLHEP "CLHEP" && return 0
     print_info "Installing CLHEP v$CLHEP_VERSION..."
@@ -825,10 +879,16 @@ install_checkmate() {
 # Shared Python venv for pip-installed analysis tools (pyhf, spey, contur)
 PYHEP_VENV="$INSTALL_PREFIX/pyhep-venv"
 ensure_pyvenv() {
-    check_command python3 || return 1
+    # Prefer the miniforge python so the analysis tools share the stack's python.
+    local py="python3"
+    if [ -x "$MAMBA_ROOT/bin/python3" ]; then
+        py="$MAMBA_ROOT/bin/python3"
+    else
+        check_command python3 || return 1
+    fi
     if [ ! -d "$PYHEP_VENV" ]; then
-        print_info "Creating Python venv at $PYHEP_VENV..."
-        python3 -m venv "$PYHEP_VENV"
+        print_info "Creating Python venv at $PYHEP_VENV (using $py)..."
+        "$py" -m venv "$PYHEP_VENV"
         "$PYHEP_VENV/bin/pip" install --upgrade pip wheel setuptools
         add_to_shell "# hepStack analysis Python tools: source \"$PYHEP_VENV/bin/activate\""
     fi
@@ -1030,6 +1090,11 @@ select_packages() {
 
 # Main installation routine
 main() {
+    # Recompute prefix-derived paths: -p/--prefix may have changed INSTALL_PREFIX
+    # after the top-level assignments ran.
+    MAMBA_ROOT="$INSTALL_PREFIX/miniforge3"
+    PYHEP_VENV="$INSTALL_PREFIX/pyhep-venv"
+
     print_ascii_art
     select_packages
     show_config
@@ -1062,6 +1127,12 @@ main() {
     }
     
     # Install packages
+    # Python first: ROOT (PyROOT), LHAPDF bindings, MadGraph, MadAnalysis5 and
+    # the pip tools all pick up whichever python3 is first on PATH.
+    if [ "$INSTALL_MAMBA" -eq 1 ]; then
+        install_mamba
+    fi
+
     if [ "$INSTALL_CLHEP" -eq 1 ]; then
         install_clhep
     fi
@@ -1136,6 +1207,7 @@ main() {
     echo "INSTALLATION SUMMARY"
     echo "=========================================="
     echo "Installation directory: $INSTALL_PREFIX"
+    [ "$INSTALL_MAMBA" -eq 1 ] && echo "✓ Miniforge/mamba ${MAMBA_VERSION:-latest} (python $PYTHON_VERSION)"
     [ "$INSTALL_CLHEP" -eq 1 ] && echo "✓ CLHEP $CLHEP_VERSION"
     [ "$INSTALL_ROOT" -eq 1 ] && echo "✓ ROOT $ROOT_VERSION"
     [ "$INSTALL_GEANT4" -eq 1 ] && echo "✓ Geant4 $GEANT4_VERSION"
@@ -1175,6 +1247,7 @@ while [ $# -gt 0 ]; do
             echo "  -h, --help         Show this help message"
             echo "  -y, --yes, --all   Skip the interactive menu; install everything selected"
             echo "  -f, --force        Rebuild even if a package is already installed"
+            echo "  --no-mamba        Skip Miniforge/mamba (use system python3 instead)"
             echo "  --no-root         Skip ROOT installation"
             echo "  --no-geant4       Skip Geant4 installation"
             echo "  --no-clhep        Skip CLHEP installation"
@@ -1219,6 +1292,10 @@ while [ $# -gt 0 ]; do
             ;;
         --no-clhep)
             INSTALL_CLHEP=0
+            shift
+            ;;
+        --no-mamba)
+            INSTALL_MAMBA=0
             shift
             ;;
         --no-lhapdf)
@@ -1274,6 +1351,8 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         --show-config)
+            MAMBA_ROOT="$INSTALL_PREFIX/miniforge3"
+            PYHEP_VENV="$INSTALL_PREFIX/pyhep-venv"
             show_config
             exit 0
             ;;

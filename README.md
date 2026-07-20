@@ -32,6 +32,9 @@ chmod +x starterpack.sh
 ## 📦 Pinned Software Versions
 
 Core stack:
+- Miniforge/mamba (self-contained Python 3.11 under `local/miniforge3` — provides
+  the python used by PyROOT, LHAPDF bindings, MadGraph, MadAnalysis5 and the pip
+  tools; skip with `--no-mamba` to use system python3)
 - ROOT: 6.38.06 (Data analysis framework)
 - Geant4: 11.3.2 (Particle physics simulation)
 - CLHEP: 2.4.7.1 (High Energy Physics library)
