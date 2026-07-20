@@ -252,15 +252,53 @@ check_command() {
     return 0
 }
 
-# Idempotency guard: returns 0 (skip) when an existing install marker is found
-# and we are not forcing a rebuild. Marker is a file/dir that only exists once
-# the package is successfully installed.
+# Single source of truth for "is this package present under $INSTALL_PREFIX?".
+# Returns the on-disk marker (a binary/dir that only exists after a successful
+# install) for a package KEY. Empty for pip packages (detected via the venv).
+pkg_marker() {
+    case "$1" in
+        CLHEP)       echo "$INSTALL_PREFIX/include/CLHEP" ;;
+        ROOT)        echo "$INSTALL_PREFIX/bin/root" ;;
+        GEANT4)      echo "$INSTALL_PREFIX/bin/geant4-config" ;;
+        LHAPDF)      echo "$INSTALL_PREFIX/bin/lhapdf-config" ;;
+        PYTHIA8)     echo "$INSTALL_PREFIX/bin/pythia8-config" ;;
+        DELPHES)     echo "$INSTALL_PREFIX/Delphes-$DELPHES_VERSION/DelphesHepMC3" ;;
+        MADGRAPH)    echo "$INSTALL_PREFIX/MG5_aMC_v$MADGRAPH_VERSION/bin/mg5_aMC" ;;
+        WHIZARD)     echo "$INSTALL_PREFIX/bin/whizard" ;;
+        CALCHEP)     echo "$INSTALL_PREFIX/calchep-$CALCHEP_VERSION/calchep" ;;
+        HERWIG)      echo "$INSTALL_PREFIX/herwig-$HERWIG_VERSION/bin/Herwig" ;;
+        MADANALYSIS) echo "$INSTALL_PREFIX/madanalysis5-$MADANALYSIS_VERSION/bin/ma5" ;;
+        RIVET)       echo "$INSTALL_PREFIX/bin/rivet" ;;
+        CHECKMATE)   echo "$INSTALL_PREFIX/checkmate2-$CHECKMATE_VERSION/bin/CheckMATE" ;;
+        *)           echo "" ;;
+    esac
+}
+
+# Returns 0 if package KEY is already installed under $INSTALL_PREFIX.
+pkg_is_installed() {
+    local key=$1
+    case "$key" in
+        PYHF|SPEY|CONTUR)
+            local pkg
+            pkg=$(echo "$key" | tr '[:upper:]' '[:lower:]')
+            [ -x "$PYHEP_VENV/bin/pip" ] && "$PYHEP_VENV/bin/pip" show "$pkg" >/dev/null 2>&1
+            ;;
+        *)
+            local marker
+            marker=$(pkg_marker "$key")
+            [ -n "$marker" ] && [ -e "$marker" ]
+            ;;
+    esac
+}
+
+# Idempotency guard used by install_* functions: returns 0 (skip) when the
+# package is already present and we are not forcing a rebuild.
 already_installed() {
-    local label=$1 marker=$2
+    local key=$1 label=$2
     if [ "$FORCE_REINSTALL" -eq 1 ]; then
         return 1
     fi
-    if [ -e "$marker" ]; then
+    if pkg_is_installed "$key"; then
         print_success "$label already installed — skipping (use --force to rebuild)."
         return 0
     fi
@@ -308,7 +346,7 @@ cmake_build() {
 
 # Installation functions
 install_clhep() {
-    already_installed "CLHEP" "$INSTALL_PREFIX/include/CLHEP" && return 0
+    already_installed CLHEP "CLHEP" && return 0
     print_info "Installing CLHEP v$CLHEP_VERSION..."
     
     cd "$BUILD_DIR"
@@ -330,7 +368,7 @@ install_clhep() {
 }
 
 install_root() {
-    already_installed "ROOT" "$INSTALL_PREFIX/bin/root" && return 0
+    already_installed ROOT "ROOT" && return 0
     print_info "Installing ROOT v$ROOT_VERSION..."
     
     cd "$BUILD_DIR"
@@ -401,7 +439,7 @@ install_root() {
 }
 
 install_geant4() {
-    already_installed "Geant4" "$INSTALL_PREFIX/bin/geant4-config" && return 0
+    already_installed GEANT4 "Geant4" && return 0
     print_info "Installing Geant4 v$GEANT4_VERSION..."
     
     cd "$BUILD_DIR"
@@ -481,7 +519,7 @@ ensure_root_env() {
 }
 
 install_lhapdf() {
-    already_installed "LHAPDF" "$INSTALL_PREFIX/bin/lhapdf-config" && return 0
+    already_installed LHAPDF "LHAPDF" && return 0
     print_info "Installing LHAPDF v$LHAPDF_VERSION..."
 
     cd "$BUILD_DIR"
@@ -511,7 +549,7 @@ install_lhapdf() {
 }
 
 install_pythia8() {
-    already_installed "Pythia8" "$INSTALL_PREFIX/bin/pythia8-config" && return 0
+    already_installed PYTHIA8 "Pythia8" && return 0
     print_info "Installing Pythia8 v$PYTHIA8_VERSION..."
 
     cd "$BUILD_DIR"
@@ -546,7 +584,7 @@ install_pythia8() {
 }
 
 install_delphes() {
-    already_installed "Delphes" "$INSTALL_PREFIX/Delphes-$DELPHES_VERSION/DelphesHepMC3" && return 0
+    already_installed DELPHES "Delphes" && return 0
     print_info "Installing Delphes v$DELPHES_VERSION..."
 
     ensure_root_env || return 1
@@ -580,7 +618,7 @@ install_delphes() {
 }
 
 install_madgraph() {
-    already_installed "MadGraph" "$INSTALL_PREFIX/MG5_aMC_v$MADGRAPH_VERSION/bin/mg5_aMC" && return 0
+    already_installed MADGRAPH "MadGraph" && return 0
     print_info "Installing MadGraph5_aMC@NLO v$MADGRAPH_VERSION..."
 
     # MadGraph is a Python application — no compilation, used in place.
@@ -606,7 +644,7 @@ install_madgraph() {
 }
 
 install_whizard() {
-    already_installed "WHIZARD" "$INSTALL_PREFIX/bin/whizard" && return 0
+    already_installed WHIZARD "WHIZARD" && return 0
     print_info "Installing WHIZARD v$WHIZARD_VERSION..."
 
     if ! command -v ocaml &> /dev/null; then
@@ -645,7 +683,7 @@ install_whizard() {
 }
 
 install_calchep() {
-    already_installed "CalcHEP" "$INSTALL_PREFIX/calchep-$CALCHEP_VERSION/calchep" && return 0
+    already_installed CALCHEP "CalcHEP" && return 0
     print_info "Installing CalcHEP v$CALCHEP_VERSION..."
 
     # CalcHEP is used in place from its own working directory.
@@ -669,7 +707,7 @@ install_calchep() {
 }
 
 install_herwig() {
-    already_installed "Herwig7" "$INSTALL_PREFIX/herwig-$HERWIG_VERSION/bin/Herwig" && return 0
+    already_installed HERWIG "Herwig7" && return 0
     print_info "Installing Herwig7 v$HERWIG_VERSION (via herwig-bootstrap — this is slow)..."
 
     # Herwig7 pulls a deep tree (ThePEG, fastjet, HepMC, gsl, boost, LHAPDF...).
@@ -702,7 +740,7 @@ install_herwig() {
 }
 
 install_madanalysis5() {
-    already_installed "MadAnalysis5" "$INSTALL_PREFIX/madanalysis5-$MADANALYSIS_VERSION/bin/ma5" && return 0
+    already_installed MADANALYSIS "MadAnalysis5" && return 0
     print_info "Installing MadAnalysis5 v$MADANALYSIS_VERSION..."
 
     # MadAnalysis5 is a Python application, used in place.
@@ -728,7 +766,7 @@ install_madanalysis5() {
 }
 
 install_rivet() {
-    already_installed "Rivet" "$INSTALL_PREFIX/bin/rivet" && return 0
+    already_installed RIVET "Rivet" && return 0
     print_info "Installing Rivet v$RIVET_VERSION (via rivet-bootstrap — builds HepMC3/YODA/fastjet)..."
 
     cd "$BUILD_DIR"
@@ -751,7 +789,7 @@ install_rivet() {
 }
 
 install_checkmate() {
-    already_installed "CheckMATE" "$INSTALL_PREFIX/checkmate2-$CHECKMATE_VERSION/bin/CheckMATE" && return 0
+    already_installed CHECKMATE "CheckMATE" && return 0
     print_info "Installing CheckMATE v$CHECKMATE_VERSION..."
 
     ensure_root_env || return 1
@@ -853,17 +891,35 @@ yes_no_prompt() {
     done
 }
 
+# Report one package's real on-disk state plus what the installer will do with it.
 show_package_status() {
-    local package_name=$1
-    local package_version=$2
-    local install_flag=$3
-    local check_command=$4
-    
-    if [ "$install_flag" = "0" ]; then
-        echo -e "  ${package_name}: ${package_version} \033[32m✅ (system)\033[0m"
+    local key=$1 name=$2 version=$3
+    local flagvar="INSTALL_$key"
+    local selected="${!flagvar}"
+    local status action
+
+    if pkg_is_installed "$key"; then
+        status="\033[32m✅ installed\033[0m"
+        if [ "$selected" = "1" ]; then
+            if [ "$FORCE_REINSTALL" -eq 1 ]; then
+                action="\033[33m→ rebuild (--force)\033[0m"
+            else
+                action="→ skip (already installed)"
+            fi
+        else
+            action="→ not selected"
+        fi
     else
-        echo -e "  ${package_name}: ${package_version} \033[31m❌ (not found)\033[0m"
+        status="\033[31m❌ not installed\033[0m"
+        if [ "$selected" = "1" ]; then
+            action="\033[34m→ will install\033[0m"
+        else
+            action="→ not selected"
+        fi
     fi
+
+    printf "  %-14s %-10s " "$name" "${version:-latest}"
+    echo -e "${status}  ${action}"
 }
 
 # Show configuration
@@ -877,23 +933,14 @@ show_config() {
     print_info "Build directory: $BUILD_DIR"
     print_info "Using $NPROC parallel jobs"
     echo
-    print_info "Package Versions:"
-    show_package_status "ROOT" "$ROOT_VERSION" "$INSTALL_ROOT"
-    show_package_status "CLHEP" "$CLHEP_VERSION" "$INSTALL_CLHEP"
-    show_package_status "Geant4" "$GEANT4_VERSION" "$INSTALL_GEANT4"
-    show_package_status "LHAPDF" "$LHAPDF_VERSION" "$INSTALL_LHAPDF"
-    show_package_status "Pythia8" "$PYTHIA8_VERSION" "$INSTALL_PYTHIA8"
-    show_package_status "Delphes" "$DELPHES_VERSION" "$INSTALL_DELPHES"
-    show_package_status "MadGraph" "$MADGRAPH_VERSION" "$INSTALL_MADGRAPH"
-    show_package_status "WHIZARD" "$WHIZARD_VERSION" "$INSTALL_WHIZARD"
-    show_package_status "CalcHEP" "$CALCHEP_VERSION" "$INSTALL_CALCHEP"
-    show_package_status "Herwig7" "$HERWIG_VERSION" "$INSTALL_HERWIG"
-    show_package_status "MadAnalysis5" "$MADANALYSIS_VERSION" "$INSTALL_MADANALYSIS"
-    show_package_status "Rivet" "$RIVET_VERSION" "$INSTALL_RIVET"
-    show_package_status "CheckMATE" "$CHECKMATE_VERSION" "$INSTALL_CHECKMATE"
-    show_package_status "pyhf" "${PYHF_VERSION:-latest}" "$INSTALL_PYHF"
-    show_package_status "spey" "${SPEY_VERSION:-latest}" "$INSTALL_SPEY"
-    show_package_status "Contur" "${CONTUR_VERSION:-latest}" "$INSTALL_CONTUR"
+    print_info "Package status (checked against $INSTALL_PREFIX):"
+    local i=0
+    while [ "$i" -lt "${#PKG_KEYS[@]}" ]; do
+        local key="${PKG_KEYS[$i]}"
+        local vervar="${key}_VERSION"
+        show_package_status "$key" "${PKG_LABELS[$i]}" "${!vervar}"
+        i=$((i + 1))
+    done
     echo
 }
 
