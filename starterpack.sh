@@ -100,6 +100,19 @@ DEFAULT_BUILD_DIR=$(read_config "build" "default_build_dir")
 ROOT_VERSION=$(read_config "versions" "root")
 CLHEP_VERSION=$(read_config "versions" "clhep")
 GEANT4_VERSION=$(read_config "versions" "geant4")
+LHAPDF_VERSION=$(read_config "versions" "lhapdf")
+PYTHIA8_VERSION=$(read_config "versions" "pythia8")
+DELPHES_VERSION=$(read_config "versions" "delphes")
+MADGRAPH_VERSION=$(read_config "versions" "madgraph")
+WHIZARD_VERSION=$(read_config "versions" "whizard")
+CALCHEP_VERSION=$(read_config "versions" "calchep")
+HERWIG_VERSION=$(read_config "versions" "herwig")
+MADANALYSIS_VERSION=$(read_config "versions" "madanalysis")
+RIVET_VERSION=$(read_config "versions" "rivet")
+CHECKMATE_VERSION=$(read_config "versions" "checkmate")
+CONTUR_VERSION=$(read_config "versions" "contur")
+PYHF_VERSION=$(read_config "versions" "pyhf")
+SPEY_VERSION=$(read_config "versions" "spey")
 
 # Default configuration
 CWD=$(pwd)
@@ -111,6 +124,31 @@ NPROC=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 INSTALL_ROOT="${INSTALL_ROOT:-1}"
 INSTALL_CLHEP="${INSTALL_CLHEP:-1}"
 INSTALL_GEANT4="${INSTALL_GEANT4:-1}"
+INSTALL_LHAPDF="${INSTALL_LHAPDF:-1}"
+INSTALL_PYTHIA8="${INSTALL_PYTHIA8:-1}"
+INSTALL_DELPHES="${INSTALL_DELPHES:-1}"
+INSTALL_MADGRAPH="${INSTALL_MADGRAPH:-1}"
+INSTALL_WHIZARD="${INSTALL_WHIZARD:-1}"
+INSTALL_CALCHEP="${INSTALL_CALCHEP:-1}"
+INSTALL_HERWIG="${INSTALL_HERWIG:-1}"
+INSTALL_MADANALYSIS="${INSTALL_MADANALYSIS:-1}"
+INSTALL_RIVET="${INSTALL_RIVET:-1}"
+INSTALL_CHECKMATE="${INSTALL_CHECKMATE:-1}"
+INSTALL_CONTUR="${INSTALL_CONTUR:-1}"
+INSTALL_PYHF="${INSTALL_PYHF:-1}"
+INSTALL_SPEY="${INSTALL_SPEY:-1}"
+
+# Skip the interactive menu and install per the current flags (set by -y/--all)
+ASSUME_YES="${ASSUME_YES:-0}"
+
+# Rebuild even if a package is already present (set by --force)
+FORCE_REINSTALL="${FORCE_REINSTALL:-0}"
+
+# Package registry — install order. The flag var is INSTALL_<KEY> and the
+# version var is <KEY>_VERSION for every entry (bash 3.2: parallel arrays,
+# no associative arrays).
+PKG_KEYS=(CLHEP ROOT GEANT4 LHAPDF PYTHIA8 DELPHES MADGRAPH WHIZARD CALCHEP HERWIG MADANALYSIS RIVET CHECKMATE PYHF SPEY CONTUR)
+PKG_LABELS=("CLHEP" "ROOT" "Geant4" "LHAPDF" "Pythia8" "Delphes" "MadGraph" "WHIZARD" "CalcHEP" "Herwig7" "MadAnalysis5" "Rivet" "CheckMATE" "pyhf" "spey" "Contur")
 
 # Get dependencies for platform
 get_deps() {
@@ -161,6 +199,22 @@ install_system_deps() {
 }
 
 # Utility functions
+# Download a single file (no extraction) to a given path.
+download_file() {
+    local url=$1
+    local dest=$2
+
+    print_info "Downloading from $url..."
+    if command -v curl &> /dev/null; then
+        curl -L -o "$dest" "$url"
+    elif command -v wget &> /dev/null; then
+        wget -q -O "$dest" "$url"
+    else
+        print_error "Neither curl nor wget found. Please install one."
+        exit 1
+    fi
+}
+
 download_and_extract() {
     local url=$1
     local output_dir=$2
@@ -196,6 +250,21 @@ check_command() {
         return 1
     fi
     return 0
+}
+
+# Idempotency guard: returns 0 (skip) when an existing install marker is found
+# and we are not forcing a rebuild. Marker is a file/dir that only exists once
+# the package is successfully installed.
+already_installed() {
+    local label=$1 marker=$2
+    if [ "$FORCE_REINSTALL" -eq 1 ]; then
+        return 1
+    fi
+    if [ -e "$marker" ]; then
+        print_success "$label already installed — skipping (use --force to rebuild)."
+        return 0
+    fi
+    return 1
 }
 
 add_to_shell() {
@@ -239,6 +308,7 @@ cmake_build() {
 
 # Installation functions
 install_clhep() {
+    already_installed "CLHEP" "$INSTALL_PREFIX/include/CLHEP" && return 0
     print_info "Installing CLHEP v$CLHEP_VERSION..."
     
     cd "$BUILD_DIR"
@@ -260,6 +330,7 @@ install_clhep() {
 }
 
 install_root() {
+    already_installed "ROOT" "$INSTALL_PREFIX/bin/root" && return 0
     print_info "Installing ROOT v$ROOT_VERSION..."
     
     cd "$BUILD_DIR"
@@ -330,6 +401,7 @@ install_root() {
 }
 
 install_geant4() {
+    already_installed "Geant4" "$INSTALL_PREFIX/bin/geant4-config" && return 0
     print_info "Installing Geant4 v$GEANT4_VERSION..."
     
     cd "$BUILD_DIR"
@@ -395,6 +467,380 @@ install_geant4() {
     print_success "Geant4 installed successfully"
 }
 
+# Make sure ROOT is usable in this shell (needed to build Delphes).
+# ROOT may have just been installed to INSTALL_PREFIX or already live on the system.
+ensure_root_env() {
+    if [ -f "$INSTALL_PREFIX/bin/thisroot.sh" ]; then
+        source "$INSTALL_PREFIX/bin/thisroot.sh"
+    fi
+    if ! command -v root-config &> /dev/null; then
+        print_error "root-config not found. Delphes needs ROOT — install ROOT first (drop --no-root)."
+        return 1
+    fi
+    return 0
+}
+
+install_lhapdf() {
+    already_installed "LHAPDF" "$INSTALL_PREFIX/bin/lhapdf-config" && return 0
+    print_info "Installing LHAPDF v$LHAPDF_VERSION..."
+
+    cd "$BUILD_DIR"
+    local lhapdf_dir="LHAPDF-$LHAPDF_VERSION"
+
+    if [ ! -d "$lhapdf_dir" ]; then
+        download_and_extract \
+            "https://lhapdf.hepforge.org/downloads/?f=LHAPDF-$LHAPDF_VERSION.tar.gz" \
+            "$lhapdf_dir"
+    fi
+
+    cd "$lhapdf_dir"
+    ./configure --prefix="$INSTALL_PREFIX"
+    make -j$NPROC
+    make install
+
+    add_to_shell "export LHAPDF_DIR=\"$INSTALL_PREFIX\""
+    add_to_shell "export LHAPDF_DATA_PATH=\"$INSTALL_PREFIX/share/LHAPDF\""
+    add_to_shell "export PATH=\"$INSTALL_PREFIX/bin:\$PATH\""
+    add_to_shell "export LD_LIBRARY_PATH=\"$INSTALL_PREFIX/lib:\$LD_LIBRARY_PATH\""
+
+    # expose the just-built lib/headers to Pythia8/WHIZARD builds in this run
+    export LHAPDF_DIR="$INSTALL_PREFIX"
+    export LHAPDF_DATA_PATH="$INSTALL_PREFIX/share/LHAPDF"
+
+    print_success "LHAPDF installed successfully"
+}
+
+install_pythia8() {
+    already_installed "Pythia8" "$INSTALL_PREFIX/bin/pythia8-config" && return 0
+    print_info "Installing Pythia8 v$PYTHIA8_VERSION..."
+
+    cd "$BUILD_DIR"
+    local pythia_dir="pythia$PYTHIA8_VERSION"
+
+    if [ ! -d "$pythia_dir" ]; then
+        download_and_extract \
+            "https://pythia.org/releases/pythia83/pythia$PYTHIA8_VERSION.tgz" \
+            "$pythia_dir"
+    fi
+
+    cd "$pythia_dir"
+
+    # Pythia8 ships its own configure (not GNU autotools)
+    local py_opts=("--prefix=$INSTALL_PREFIX")
+    if [ -f "$INSTALL_PREFIX/bin/lhapdf-config" ]; then
+        py_opts+=("--with-lhapdf6=$INSTALL_PREFIX")
+    fi
+
+    ./configure "${py_opts[@]}"
+    make -j$NPROC
+    make install
+
+    add_to_shell "export PYTHIA8=\"$INSTALL_PREFIX\""
+    add_to_shell "export PYTHIA8DATA=\"$INSTALL_PREFIX/share/Pythia8/xmldoc\""
+    add_to_shell "export LD_LIBRARY_PATH=\"$INSTALL_PREFIX/lib:\$LD_LIBRARY_PATH\""
+
+    export PYTHIA8="$INSTALL_PREFIX"
+    export PYTHIA8DATA="$INSTALL_PREFIX/share/Pythia8/xmldoc"
+
+    print_success "Pythia8 installed successfully"
+}
+
+install_delphes() {
+    already_installed "Delphes" "$INSTALL_PREFIX/Delphes-$DELPHES_VERSION/DelphesHepMC3" && return 0
+    print_info "Installing Delphes v$DELPHES_VERSION..."
+
+    ensure_root_env || return 1
+
+    # Delphes is used in place; keep the built tree under the install prefix.
+    local delphes_dir="$INSTALL_PREFIX/Delphes-$DELPHES_VERSION"
+
+    if [ ! -d "$delphes_dir" ]; then
+        download_and_extract \
+            "http://cp3.irmp.ucl.ac.be/downloads/Delphes-$DELPHES_VERSION.tar.gz" \
+            "$delphes_dir"
+    fi
+
+    cd "$delphes_dir"
+
+    # Build core executables; link against Pythia8 if we built it.
+    if [ -f "$INSTALL_PREFIX/bin/pythia8-config" ] || [ -d "$INSTALL_PREFIX/include/Pythia8" ]; then
+        export PYTHIA8="$INSTALL_PREFIX"
+        make -j$NPROC HAS_PYTHIA8=true
+        make -j$NPROC HAS_PYTHIA8=true display 2>/dev/null || true
+    else
+        make -j$NPROC
+    fi
+
+    add_to_shell "export DELPHES_DIR=\"$delphes_dir\""
+    add_to_shell "export PATH=\"$delphes_dir:\$PATH\""
+    add_to_shell "export LD_LIBRARY_PATH=\"$delphes_dir:\$LD_LIBRARY_PATH\""
+    add_to_shell "export ROOT_INCLUDE_PATH=\"$delphes_dir/external:\$ROOT_INCLUDE_PATH\""
+
+    print_success "Delphes installed successfully"
+}
+
+install_madgraph() {
+    already_installed "MadGraph" "$INSTALL_PREFIX/MG5_aMC_v$MADGRAPH_VERSION/bin/mg5_aMC" && return 0
+    print_info "Installing MadGraph5_aMC@NLO v$MADGRAPH_VERSION..."
+
+    # MadGraph is a Python application — no compilation, used in place.
+    local mg_dir="$INSTALL_PREFIX/MG5_aMC_v$MADGRAPH_VERSION"
+    
+    if [ ! -d "$mg_dir" ]; then
+        download_and_extract \
+            "https://github.com/mg5amcnlo/mg5amcnlo/archive/refs/tags/v$MADGRAPH_VERSION.tar.gz" \
+            "$mg_dir"
+    fi
+
+    if [ ! -f "$mg_dir/bin/mg5_aMC" ]; then
+        print_error "MadGraph executable not found at $mg_dir/bin/mg5_aMC"
+        return 1
+    fi
+    chmod +x "$mg_dir/bin/mg5_aMC" 2>/dev/null || true
+
+    add_to_shell "export MG5_DIR=\"$mg_dir\""
+    add_to_shell "export PATH=\"$mg_dir/bin:\$PATH\""
+
+    print_info "Tip: inside mg5_aMC use 'install pythia8 lhapdf6' or point to the ones built here."
+    print_success "MadGraph installed successfully"
+}
+
+install_whizard() {
+    already_installed "WHIZARD" "$INSTALL_PREFIX/bin/whizard" && return 0
+    print_info "Installing WHIZARD v$WHIZARD_VERSION..."
+
+    if ! command -v ocaml &> /dev/null; then
+        print_error "OCaml not found. WHIZARD needs OCaml (>=4.05) — install system deps first."
+        return 1
+    fi
+
+    cd "$BUILD_DIR"
+    local whizard_dir="whizard-$WHIZARD_VERSION"
+
+    if [ ! -d "$whizard_dir" ]; then
+        download_and_extract \
+            "https://whizard.hepforge.org/downloads/?f=whizard-$WHIZARD_VERSION.tar.gz" \
+            "$whizard_dir"
+    fi
+
+    cd "$whizard_dir"
+
+    local wz_opts=("--prefix=$INSTALL_PREFIX")
+    [ -f "$INSTALL_PREFIX/bin/lhapdf-config" ]  && wz_opts+=("--enable-lhapdf")
+    [ -f "$INSTALL_PREFIX/bin/pythia8-config" ] && wz_opts+=("--enable-pythia8" "--with-pythia8=$INSTALL_PREFIX")
+    if command -v root-config &> /dev/null; then
+        wz_opts+=("--enable-hepmc" "HEPMC_DIR=$INSTALL_PREFIX")
+    fi
+
+    print_info "WHIZARD configure: ${wz_opts[*]}"
+    ./configure "${wz_opts[@]}"
+    make -j$NPROC
+    make install
+
+    add_to_shell "export WHIZARD_DIR=\"$INSTALL_PREFIX\""
+    add_to_shell "export PATH=\"$INSTALL_PREFIX/bin:\$PATH\""
+    add_to_shell "export LD_LIBRARY_PATH=\"$INSTALL_PREFIX/lib:\$LD_LIBRARY_PATH\""
+
+    print_success "WHIZARD installed successfully"
+}
+
+install_calchep() {
+    already_installed "CalcHEP" "$INSTALL_PREFIX/calchep-$CALCHEP_VERSION/calchep" && return 0
+    print_info "Installing CalcHEP v$CALCHEP_VERSION..."
+
+    # CalcHEP is used in place from its own working directory.
+    local calchep_dir="$INSTALL_PREFIX/calchep-$CALCHEP_VERSION"
+
+    if [ ! -d "$calchep_dir" ]; then
+        download_and_extract \
+            "https://theory.sinp.msu.ru/~pukhov/CALCHEP/calchep_$CALCHEP_VERSION.tgz" \
+            "$calchep_dir"
+    fi
+
+    cd "$calchep_dir"
+    make
+
+    add_to_shell "export CALCHEP_DIR=\"$calchep_dir\""
+    add_to_shell "export PATH=\"$calchep_dir:\$PATH\""
+
+    print_info "Tip: run '$calchep_dir/mkUsrDir <workdir>' to create a CalcHEP working area."
+    print_success "CalcHEP installed successfully"
+    print_warning "CompHEP is the legacy predecessor of CalcHEP and is not maintained; CalcHEP supersedes it."
+}
+
+install_herwig() {
+    already_installed "Herwig7" "$INSTALL_PREFIX/herwig-$HERWIG_VERSION/bin/Herwig" && return 0
+    print_info "Installing Herwig7 v$HERWIG_VERSION (via herwig-bootstrap — this is slow)..."
+
+    # Herwig7 pulls a deep tree (ThePEG, fastjet, HepMC, gsl, boost, LHAPDF...).
+    # The upstream bootstrap script builds and wires all of it together.
+    local herwig_dir="$INSTALL_PREFIX/herwig-$HERWIG_VERSION"
+    mkdir -p "$herwig_dir"
+
+    cd "$BUILD_DIR"
+    if [ ! -f "herwig-bootstrap" ]; then
+        download_file \
+            "https://herwig.hepforge.org/downloads/herwig-bootstrap" \
+            "herwig-bootstrap"
+    fi
+    chmod +x herwig-bootstrap
+
+    # Reuse the LHAPDF we already built rather than rebuilding it.
+    local hw_opts=("-j" "$NPROC")
+    if [ -f "$INSTALL_PREFIX/bin/lhapdf-config" ]; then
+        hw_opts+=("--with-lhapdf=$INSTALL_PREFIX")
+    fi
+
+    ./herwig-bootstrap "${hw_opts[@]}" "$herwig_dir"
+
+    add_to_shell "export HERWIG_DIR=\"$herwig_dir\""
+    add_to_shell "export PATH=\"$herwig_dir/bin:\$PATH\""
+    add_to_shell "export LD_LIBRARY_PATH=\"$herwig_dir/lib:\$LD_LIBRARY_PATH\""
+    add_to_shell "source \"$herwig_dir/bin/activate\" 2>/dev/null || true"
+
+    print_success "Herwig7 installed successfully"
+}
+
+install_madanalysis5() {
+    already_installed "MadAnalysis5" "$INSTALL_PREFIX/madanalysis5-$MADANALYSIS_VERSION/bin/ma5" && return 0
+    print_info "Installing MadAnalysis5 v$MADANALYSIS_VERSION..."
+
+    # MadAnalysis5 is a Python application, used in place.
+    local ma5_dir="$INSTALL_PREFIX/madanalysis5-$MADANALYSIS_VERSION"
+
+    if [ ! -d "$ma5_dir" ]; then
+        download_and_extract \
+            "https://github.com/MadAnalysis/madanalysis5/archive/refs/tags/v$MADANALYSIS_VERSION.tar.gz" \
+            "$ma5_dir"
+    fi
+
+    if [ ! -f "$ma5_dir/bin/ma5" ]; then
+        print_error "MadAnalysis5 launcher not found at $ma5_dir/bin/ma5"
+        return 1
+    fi
+    chmod +x "$ma5_dir/bin/ma5" 2>/dev/null || true
+
+    add_to_shell "export MA5_DIR=\"$ma5_dir\""
+    add_to_shell "export PATH=\"$ma5_dir/bin:\$PATH\""
+
+    print_info "Tip: first launch of 'ma5' installs its own dependencies (fastjet, etc.) on demand."
+    print_success "MadAnalysis5 installed successfully"
+}
+
+install_rivet() {
+    already_installed "Rivet" "$INSTALL_PREFIX/bin/rivet" && return 0
+    print_info "Installing Rivet v$RIVET_VERSION (via rivet-bootstrap — builds HepMC3/YODA/fastjet)..."
+
+    cd "$BUILD_DIR"
+    if [ ! -f "rivet-bootstrap" ]; then
+        download_file \
+            "https://gitlab.com/hepcedar/rivetbootstrap/-/raw/$RIVET_VERSION/rivet-bootstrap" \
+            "rivet-bootstrap"
+    fi
+    chmod +x rivet-bootstrap
+
+    # The bootstrap installs everything under INSTALL_PREFIX.
+    INSTALL_PREFIX="$INSTALL_PREFIX" MAKE="make -j$NPROC" ./rivet-bootstrap
+
+    add_to_shell "export RIVET_DIR=\"$INSTALL_PREFIX\""
+    add_to_shell "export PATH=\"$INSTALL_PREFIX/bin:\$PATH\""
+    add_to_shell "export LD_LIBRARY_PATH=\"$INSTALL_PREFIX/lib:\$LD_LIBRARY_PATH\""
+    add_to_shell "source \"$INSTALL_PREFIX/rivetenv.sh\" 2>/dev/null || true"
+
+    print_success "Rivet installed successfully"
+}
+
+install_checkmate() {
+    already_installed "CheckMATE" "$INSTALL_PREFIX/checkmate2-$CHECKMATE_VERSION/bin/CheckMATE" && return 0
+    print_info "Installing CheckMATE v$CHECKMATE_VERSION..."
+
+    ensure_root_env || return 1
+
+    local cm_dir="$INSTALL_PREFIX/checkmate2-$CHECKMATE_VERSION"
+
+    if [ ! -d "$cm_dir" ]; then
+        download_and_extract \
+            "https://github.com/CheckMATE2/checkmate2/archive/refs/tags/v$CHECKMATE_VERSION.tar.gz" \
+            "$cm_dir"
+    fi
+
+    cd "$cm_dir"
+
+    # CheckMATE ties together ROOT, Delphes, Pythia8 and MadGraph.
+    local cm_opts=("--with-rootsys=$ROOTSYS")
+    local delphes_dir="$INSTALL_PREFIX/Delphes-$DELPHES_VERSION"
+    local mg_dir="$INSTALL_PREFIX/MG5_aMC_v$MADGRAPH_VERSION"
+    [ -d "$delphes_dir" ]                  && cm_opts+=("--with-delphes=$delphes_dir")
+    [ -f "$INSTALL_PREFIX/bin/pythia8-config" ] && cm_opts+=("--with-pythia=$INSTALL_PREFIX")
+    [ -d "$mg_dir" ]                       && cm_opts+=("--with-madgraph=$mg_dir")
+
+    print_info "CheckMATE configure: ${cm_opts[*]}"
+    ./configure "${cm_opts[@]}"
+    make -j$NPROC
+
+    add_to_shell "export CHECKMATE_DIR=\"$cm_dir\""
+    add_to_shell "export PATH=\"$cm_dir/bin:\$PATH\""
+
+    print_success "CheckMATE installed successfully"
+}
+
+# Shared Python venv for pip-installed analysis tools (pyhf, spey, contur)
+PYHEP_VENV="$INSTALL_PREFIX/pyhep-venv"
+ensure_pyvenv() {
+    check_command python3 || return 1
+    if [ ! -d "$PYHEP_VENV" ]; then
+        print_info "Creating Python venv at $PYHEP_VENV..."
+        python3 -m venv "$PYHEP_VENV"
+        "$PYHEP_VENV/bin/pip" install --upgrade pip wheel setuptools
+        add_to_shell "# hepStack analysis Python tools: source \"$PYHEP_VENV/bin/activate\""
+    fi
+    return 0
+}
+
+# Build a "pkg==version" spec, or just "pkg" when the version is blank
+pip_spec() {
+    local pkg=$1 ver=$2
+    if [ -n "$ver" ]; then echo "$pkg==$ver"; else echo "$pkg"; fi
+}
+
+# Idempotency guard for pip packages: skip if already present in the venv
+# (and, when a version is pinned, only skip if that version matches).
+pip_already_installed() {
+    local pkg=$1 ver=$2 have
+    [ "$FORCE_REINSTALL" -eq 1 ] && return 1
+    [ -x "$PYHEP_VENV/bin/pip" ] || return 1
+    have=$("$PYHEP_VENV/bin/pip" show "$pkg" 2>/dev/null | awk -F': ' '/^Version:/{print $2}')
+    [ -z "$have" ] && return 1
+    [ -n "$ver" ] && [ "$have" != "$ver" ] && return 1
+    print_success "$pkg $have already installed — skipping (use --force to reinstall)."
+    return 0
+}
+
+install_pyhf() {
+    ensure_pyvenv || return 1
+    pip_already_installed pyhf "$PYHF_VERSION" && return 0
+    print_info "Installing pyhf ${PYHF_VERSION:-(latest)}..."
+    "$PYHEP_VENV/bin/pip" install "$(pip_spec pyhf "$PYHF_VERSION")"
+    print_success "pyhf installed successfully (in $PYHEP_VENV)"
+}
+
+install_spey() {
+    ensure_pyvenv || return 1
+    pip_already_installed spey "$SPEY_VERSION" && return 0
+    print_info "Installing spey ${SPEY_VERSION:-(latest)}..."
+    "$PYHEP_VENV/bin/pip" install "$(pip_spec spey "$SPEY_VERSION")"
+    print_success "spey installed successfully (in $PYHEP_VENV)"
+}
+
+install_contur() {
+    ensure_pyvenv || return 1
+    pip_already_installed contur "$CONTUR_VERSION" && return 0
+    print_info "Installing Contur ${CONTUR_VERSION:-(latest)}..."
+    "$PYHEP_VENV/bin/pip" install "$(pip_spec contur "$CONTUR_VERSION")"
+    print_warning "Contur needs Rivet/YODA at runtime — make sure Rivet is installed and sourced."
+    print_success "Contur installed successfully (in $PYHEP_VENV)"
+}
+
 # Simple yes/no prompt
 yes_no_prompt() {
     while true; do
@@ -435,6 +881,19 @@ show_config() {
     show_package_status "ROOT" "$ROOT_VERSION" "$INSTALL_ROOT"
     show_package_status "CLHEP" "$CLHEP_VERSION" "$INSTALL_CLHEP"
     show_package_status "Geant4" "$GEANT4_VERSION" "$INSTALL_GEANT4"
+    show_package_status "LHAPDF" "$LHAPDF_VERSION" "$INSTALL_LHAPDF"
+    show_package_status "Pythia8" "$PYTHIA8_VERSION" "$INSTALL_PYTHIA8"
+    show_package_status "Delphes" "$DELPHES_VERSION" "$INSTALL_DELPHES"
+    show_package_status "MadGraph" "$MADGRAPH_VERSION" "$INSTALL_MADGRAPH"
+    show_package_status "WHIZARD" "$WHIZARD_VERSION" "$INSTALL_WHIZARD"
+    show_package_status "CalcHEP" "$CALCHEP_VERSION" "$INSTALL_CALCHEP"
+    show_package_status "Herwig7" "$HERWIG_VERSION" "$INSTALL_HERWIG"
+    show_package_status "MadAnalysis5" "$MADANALYSIS_VERSION" "$INSTALL_MADANALYSIS"
+    show_package_status "Rivet" "$RIVET_VERSION" "$INSTALL_RIVET"
+    show_package_status "CheckMATE" "$CHECKMATE_VERSION" "$INSTALL_CHECKMATE"
+    show_package_status "pyhf" "${PYHF_VERSION:-latest}" "$INSTALL_PYHF"
+    show_package_status "spey" "${SPEY_VERSION:-latest}" "$INSTALL_SPEY"
+    show_package_status "Contur" "${CONTUR_VERSION:-latest}" "$INSTALL_CONTUR"
     echo
 }
 
@@ -450,14 +909,99 @@ print_ascii_art() {
     echo
 }
 
+# Interactive package selector — toggle INSTALL_<KEY> flags by number.
+select_packages() {
+    # Bypass when -y/--all was given, or when there is no interactive terminal.
+    if [ "$ASSUME_YES" -eq 1 ]; then
+        return
+    fi
+    if [ ! -t 0 ]; then
+        print_warning "Non-interactive shell detected — installing per current flags."
+        print_warning "Use -y/--all or the --no-<pkg> flags to control the selection."
+        return
+    fi
+
+    local n=${#PKG_KEYS[@]}
+    while true; do
+        echo
+        print_info "Select packages to install — toggle by number:"
+        echo "=================================================="
+        local i=0
+        while [ "$i" -lt "$n" ]; do
+            local key="${PKG_KEYS[$i]}"
+            local flagvar="INSTALL_$key"
+            local vervar="${key}_VERSION"
+            local state="${!flagvar}"
+            local ver="${!vervar}"
+            local mark=" "
+            [ "$state" = "1" ] && mark="x"
+            printf "  %2d) [%s] %-14s %s\n" "$((i + 1))" "$mark" "${PKG_LABELS[$i]}" "${ver:-latest}"
+            i=$((i + 1))
+        done
+        echo "--------------------------------------------------"
+        echo "  a) select all      d) deselect all"
+        echo "  i) install selected      q) quit"
+        echo
+        read -p "Toggle number(s) [e.g. 3 7 12], or a/d/i/q: " reply
+
+        case "$reply" in
+            "")            ;;                                   # just redisplay
+            a|A)           for key in "${PKG_KEYS[@]}"; do eval "INSTALL_$key=1"; done ;;
+            d|D|n|N)       for key in "${PKG_KEYS[@]}"; do eval "INSTALL_$key=0"; done ;;
+            i|I|c|C|go|GO) break ;;
+            q|Q)           print_info "Aborted by user — nothing installed."; exit 0 ;;
+            *)
+                local tok
+                for tok in $(echo "$reply" | tr ',' ' '); do
+                    if echo "$tok" | grep -qE '^[0-9]+$' && [ "$tok" -ge 1 ] && [ "$tok" -le "$n" ]; then
+                        local key="${PKG_KEYS[$((tok - 1))]}"
+                        local flagvar="INSTALL_$key"
+                        if [ "${!flagvar}" = "1" ]; then
+                            eval "INSTALL_$key=0"
+                        else
+                            eval "INSTALL_$key=1"
+                        fi
+                    else
+                        print_warning "Ignoring invalid entry: $tok"
+                    fi
+                done
+                ;;
+        esac
+    done
+
+    # Nothing selected? Offer a graceful out.
+    local any=0
+    for key in "${PKG_KEYS[@]}"; do
+        local flagvar="INSTALL_$key"
+        [ "${!flagvar}" = "1" ] && any=1
+    done
+    if [ "$any" -eq 0 ]; then
+        print_warning "No packages selected — nothing to install."
+        exit 0
+    fi
+}
+
 # Main installation routine
 main() {
     print_ascii_art
+    select_packages
     show_config
-    
+
+    # Confirm before doing any heavy work
+    if [ "$ASSUME_YES" -ne 1 ] && [ -t 0 ]; then
+        yes_no_prompt "Proceed with the selection above?" || { print_info "Aborted."; exit 0; }
+    fi
+
     # Create directories
     mkdir -p "$INSTALL_PREFIX" "$BUILD_DIR"
-    
+
+    # Make freshly-installed tools discoverable to later builds in this same run
+    # (root-config, lhapdf-config, pythia8 headers, etc.). Persistent shell
+    # exports are still written via add_to_shell for future sessions.
+    export PATH="$INSTALL_PREFIX/bin:$PATH"
+    export LD_LIBRARY_PATH="$INSTALL_PREFIX/lib:${LD_LIBRARY_PATH:-}"
+    export DYLD_LIBRARY_PATH="$INSTALL_PREFIX/lib:${DYLD_LIBRARY_PATH:-}"
+
     # Install system dependencies
     if yes_no_prompt "Install system dependencies?"; then
         install_system_deps
@@ -482,7 +1026,61 @@ main() {
     if [ "$INSTALL_GEANT4" -eq 1 ]; then
         install_geant4
     fi
-    
+
+    # --- Phenomenology / generator chain (order matters) ---
+    if [ "$INSTALL_LHAPDF" -eq 1 ]; then
+        install_lhapdf
+    fi
+
+    if [ "$INSTALL_PYTHIA8" -eq 1 ]; then
+        install_pythia8
+    fi
+
+    if [ "$INSTALL_DELPHES" -eq 1 ]; then
+        install_delphes
+    fi
+
+    if [ "$INSTALL_MADGRAPH" -eq 1 ]; then
+        install_madgraph
+    fi
+
+    if [ "$INSTALL_WHIZARD" -eq 1 ]; then
+        install_whizard
+    fi
+
+    if [ "$INSTALL_CALCHEP" -eq 1 ]; then
+        install_calchep
+    fi
+
+    if [ "$INSTALL_HERWIG" -eq 1 ]; then
+        install_herwig
+    fi
+
+    # --- Analysis, recasting & limits ---
+    if [ "$INSTALL_MADANALYSIS" -eq 1 ]; then
+        install_madanalysis5
+    fi
+
+    if [ "$INSTALL_RIVET" -eq 1 ]; then
+        install_rivet
+    fi
+
+    if [ "$INSTALL_CHECKMATE" -eq 1 ]; then
+        install_checkmate
+    fi
+
+    if [ "$INSTALL_PYHF" -eq 1 ]; then
+        install_pyhf
+    fi
+
+    if [ "$INSTALL_SPEY" -eq 1 ]; then
+        install_spey
+    fi
+
+    if [ "$INSTALL_CONTUR" -eq 1 ]; then
+        install_contur
+    fi
+
     # Final summary
     echo
     print_success "Installation completed!"
@@ -494,6 +1092,19 @@ main() {
     [ "$INSTALL_CLHEP" -eq 1 ] && echo "✓ CLHEP $CLHEP_VERSION"
     [ "$INSTALL_ROOT" -eq 1 ] && echo "✓ ROOT $ROOT_VERSION"
     [ "$INSTALL_GEANT4" -eq 1 ] && echo "✓ Geant4 $GEANT4_VERSION"
+    [ "$INSTALL_LHAPDF" -eq 1 ] && echo "✓ LHAPDF $LHAPDF_VERSION"
+    [ "$INSTALL_PYTHIA8" -eq 1 ] && echo "✓ Pythia8 $PYTHIA8_VERSION"
+    [ "$INSTALL_DELPHES" -eq 1 ] && echo "✓ Delphes $DELPHES_VERSION"
+    [ "$INSTALL_MADGRAPH" -eq 1 ] && echo "✓ MadGraph $MADGRAPH_VERSION"
+    [ "$INSTALL_WHIZARD" -eq 1 ] && echo "✓ WHIZARD $WHIZARD_VERSION"
+    [ "$INSTALL_CALCHEP" -eq 1 ] && echo "✓ CalcHEP $CALCHEP_VERSION"
+    [ "$INSTALL_HERWIG" -eq 1 ] && echo "✓ Herwig7 $HERWIG_VERSION"
+    [ "$INSTALL_MADANALYSIS" -eq 1 ] && echo "✓ MadAnalysis5 $MADANALYSIS_VERSION"
+    [ "$INSTALL_RIVET" -eq 1 ] && echo "✓ Rivet $RIVET_VERSION"
+    [ "$INSTALL_CHECKMATE" -eq 1 ] && echo "✓ CheckMATE $CHECKMATE_VERSION"
+    [ "$INSTALL_PYHF" -eq 1 ] && echo "✓ pyhf ${PYHF_VERSION:-latest}"
+    [ "$INSTALL_SPEY" -eq 1 ] && echo "✓ spey ${SPEY_VERSION:-latest}"
+    [ "$INSTALL_CONTUR" -eq 1 ] && echo "✓ Contur ${CONTUR_VERSION:-latest}"
     echo
     print_info "Next steps:"
     echo "1. Restart your terminal or run: source ~/.bashrc"
@@ -515,9 +1126,24 @@ while [ $# -gt 0 ]; do
             echo "Options:"
             echo "  -p, --prefix DIR    Installation directory (default: $DEFAULT_PREFIX)"
             echo "  -h, --help         Show this help message"
+            echo "  -y, --yes, --all   Skip the interactive menu; install everything selected"
+            echo "  -f, --force        Rebuild even if a package is already installed"
             echo "  --no-root         Skip ROOT installation"
             echo "  --no-geant4       Skip Geant4 installation"
             echo "  --no-clhep        Skip CLHEP installation"
+            echo "  --no-lhapdf       Skip LHAPDF installation"
+            echo "  --no-pythia8      Skip Pythia8 installation"
+            echo "  --no-delphes      Skip Delphes installation"
+            echo "  --no-madgraph     Skip MadGraph installation"
+            echo "  --no-whizard      Skip WHIZARD installation"
+            echo "  --no-calchep      Skip CalcHEP installation"
+            echo "  --no-herwig       Skip Herwig7 installation"
+            echo "  --no-madanalysis  Skip MadAnalysis5 installation"
+            echo "  --no-rivet        Skip Rivet installation"
+            echo "  --no-checkmate    Skip CheckMATE installation"
+            echo "  --no-pyhf         Skip pyhf installation"
+            echo "  --no-spey         Skip spey installation"
+            echo "  --no-contur       Skip Contur installation"
             echo "  --show-config     Show current configuration"
             echo
             echo "Environment variables:"
@@ -527,6 +1153,14 @@ while [ $# -gt 0 ]; do
             echo
             echo "Configuration file: $CONFIG_FILE"
             exit 0
+            ;;
+        -y|--yes|--all)
+            ASSUME_YES=1
+            shift
+            ;;
+        -f|--force)
+            FORCE_REINSTALL=1
+            shift
             ;;
         --no-root)
             INSTALL_ROOT=0
@@ -538,6 +1172,58 @@ while [ $# -gt 0 ]; do
             ;;
         --no-clhep)
             INSTALL_CLHEP=0
+            shift
+            ;;
+        --no-lhapdf)
+            INSTALL_LHAPDF=0
+            shift
+            ;;
+        --no-pythia8)
+            INSTALL_PYTHIA8=0
+            shift
+            ;;
+        --no-delphes)
+            INSTALL_DELPHES=0
+            shift
+            ;;
+        --no-madgraph)
+            INSTALL_MADGRAPH=0
+            shift
+            ;;
+        --no-whizard)
+            INSTALL_WHIZARD=0
+            shift
+            ;;
+        --no-calchep)
+            INSTALL_CALCHEP=0
+            shift
+            ;;
+        --no-herwig)
+            INSTALL_HERWIG=0
+            shift
+            ;;
+        --no-madanalysis)
+            INSTALL_MADANALYSIS=0
+            shift
+            ;;
+        --no-rivet)
+            INSTALL_RIVET=0
+            shift
+            ;;
+        --no-checkmate)
+            INSTALL_CHECKMATE=0
+            shift
+            ;;
+        --no-pyhf)
+            INSTALL_PYHF=0
+            shift
+            ;;
+        --no-spey)
+            INSTALL_SPEY=0
+            shift
+            ;;
+        --no-contur)
+            INSTALL_CONTUR=0
             shift
             ;;
         --show-config)
