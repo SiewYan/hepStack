@@ -17,8 +17,36 @@ print_success() { echo -e "${GREEN}✓ SUCCESS:${NC} $1"; }
 print_warning() { echo -e "${YELLOW}⚠ WARNING:${NC} $1"; }
 print_error() { echo -e "${RED}✗ ERROR:${NC} $1"; }
 
+# Absolute directory this script lives in — used to anchor relative config paths
+# so the install location is stable regardless of the caller's working directory.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Resolve a path to a clean, absolute path.
+#   $1 = path (relative or absolute)
+#   $2 = base to resolve a relative path against (default: $SCRIPT_DIR)
+# Absolute inputs are kept as-is; relative inputs are joined with the base.
+# When the resolved directory exists it is canonicalized via `pwd -P` (resolves
+# "." "//" ".." and symlinks); otherwise a lightweight sed tidy is applied.
+abspath() {
+    local path=$1
+    local base=${2:-$SCRIPT_DIR}
+    # Drop leading "./" segments so a relative default like "./local" joins cleanly.
+    while [ "${path#./}" != "$path" ]; do path="${path#./}"; done
+    case "$path" in
+        /*) : ;;
+        *)  path="$base/$path" ;;
+    esac
+    if [ -d "$path" ]; then
+        ( cd "$path" && pwd -P )
+    else
+        # Collapse duplicate slashes and strip a trailing slash (':' delimiter
+        # avoids escaping the slashes). No filesystem side effects.
+        printf '%s' "$path" | sed -e 's:/\{2,\}:/:g' -e 's:\(.\)/$:\1:'
+    fi
+}
+
 # Configuration file
-CONFIG_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/dependencies.conf"
+CONFIG_FILE="$SCRIPT_DIR/dependencies.conf"
 if [ ! -f "$CONFIG_FILE" ]; then
     print_error "Configuration file not found: $CONFIG_FILE"
     exit 1
@@ -119,8 +147,22 @@ PYTHON_PACKAGES=$(read_config "python" "packages")
 
 # Default configuration
 CWD=$(pwd)
-INSTALL_PREFIX="${INSTALL_PREFIX:-$CWD/$DEFAULT_PREFIX}"
-BUILD_DIR="${BUILD_DIR:-$CWD/$DEFAULT_BUILD_DIR}"
+# Config defaults (default_prefix / default_build_dir) are relative and anchored
+# to the script directory, so `local/` and `build/` always land beside the
+# installer no matter where it is invoked from. Explicit overrides via the
+# INSTALL_PREFIX / BUILD_DIR environment variables are resolved against the
+# caller's CWD (standard CLI convention). Either way the result is absolute,
+# so every path written to the shell rc is absolute too.
+if [ -n "${INSTALL_PREFIX:-}" ]; then
+    INSTALL_PREFIX=$(abspath "$INSTALL_PREFIX" "$CWD")
+else
+    INSTALL_PREFIX=$(abspath "$DEFAULT_PREFIX" "$SCRIPT_DIR")
+fi
+if [ -n "${BUILD_DIR:-}" ]; then
+    BUILD_DIR=$(abspath "$BUILD_DIR" "$CWD")
+else
+    BUILD_DIR=$(abspath "$DEFAULT_BUILD_DIR" "$SCRIPT_DIR")
+fi
 NPROC=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 # Installation flags
@@ -1107,6 +1149,14 @@ main() {
     # Create directories
     mkdir -p "$INSTALL_PREFIX" "$BUILD_DIR"
 
+    # Now that the dirs exist, lock in fully canonical (symlink-resolved)
+    # absolute paths, so every export written to the shell rc points at the real
+    # physical location rather than a symlink that could later move or vanish.
+    INSTALL_PREFIX=$(cd "$INSTALL_PREFIX" && pwd -P)
+    BUILD_DIR=$(cd "$BUILD_DIR" && pwd -P)
+    MAMBA_ROOT="$INSTALL_PREFIX/miniforge3"
+    PYHEP_VENV="$INSTALL_PREFIX/pyhep-venv"
+
     # Make freshly-installed tools discoverable to later builds in this same run
     # (root-config, lhapdf-config, pythia8 headers, etc.). Persistent shell
     # exports are still written via add_to_shell for future sessions.
@@ -1237,7 +1287,7 @@ main() {
 while [ $# -gt 0 ]; do
     case $1 in
         -p|--prefix)
-            INSTALL_PREFIX="$2"
+            INSTALL_PREFIX=$(abspath "$2" "$CWD")
             shift 2
             ;;
         -h|--help)
