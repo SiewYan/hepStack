@@ -190,6 +190,11 @@ ASSUME_YES="${ASSUME_YES:-0}"
 # Rebuild even if a package is already present (set by --force)
 FORCE_REINSTALL="${FORCE_REINSTALL:-0}"
 
+# Environment delivery method. 1 (default) = generate Lmod modulefiles and do
+# NOT touch the user's shell rc; 0 = fall back to writing exports into
+# ~/.bashrc / ~/.zshrc (set by --no-modules).
+USE_MODULES="${USE_MODULES:-1}"
+
 # Package registry — install order. The flag var is INSTALL_<KEY> and the
 # version var is <KEY>_VERSION for every entry (bash 3.2: parallel arrays,
 # no associative arrays).
@@ -198,6 +203,10 @@ PKG_LABELS=("mamba/Python" "CLHEP" "ROOT" "Geant4" "LHAPDF" "Pythia8" "Delphes" 
 
 # Miniforge lives under the prefix; its bin provides python3 for every build.
 MAMBA_ROOT="$INSTALL_PREFIX/miniforge3"
+
+# Generated Lmod (.lua) modulefiles live here; this dir is what users add to
+# their MODULEPATH (via `module use`) after installation.
+MODULES_DIR="$INSTALL_PREFIX/modulefiles"
 
 # Get dependencies for platform
 get_deps() {
@@ -356,6 +365,9 @@ already_installed() {
 }
 
 add_to_shell() {
+    # With modulefiles as the delivery method, environment comes from
+    # `module load`, so we deliberately never modify the user's shell rc.
+    [ "${USE_MODULES:-1}" -eq 1 ] && return 0
     local line=$1
     local shell_rc="$HOME/.bashrc"
     
@@ -1130,12 +1142,200 @@ select_packages() {
     fi
 }
 
+# ---------------------------------------------------------------------------
+# Lmod modulefile generation
+# ---------------------------------------------------------------------------
+
+# Module name for a package KEY (a couple differ from the lowercased key).
+module_name() {
+    case "$1" in
+        MAMBA)       echo "python-hepstack" ;;
+        MADANALYSIS) echo "madanalysis5" ;;
+        PYHF|SPEY|CONTUR) echo "hep-stats" ;;   # share one venv module
+        *)           echo "$1" | tr '[:upper:]' '[:lower:]' ;;
+    esac
+}
+
+# Write one Lua modulefile: $INSTALL_PREFIX/modulefiles/<name>/<version>.lua
+# Uses Lmod's source_sh() to wrap the packages that ship a setup script
+# (thisroot.sh, geant4.sh, rivetenv.sh, herwig activate).
+write_modulefile() {
+    local key=$1 label=$2 version=$3
+    local name; name=$(module_name "$key")
+    local dir="$MODULES_DIR/$name"
+    mkdir -p "$dir"
+    local mf="$dir/$version.lua"
+
+    {
+        echo "help([[${label} ${version} — hepStack]])"
+        echo "whatis(\"${label} ${version} (hepStack)\")"
+        echo "local root = \"${INSTALL_PREFIX}\""
+    } > "$mf"
+
+    case "$key" in
+        MAMBA)
+            echo 'prepend_path("PATH", pathJoin(root, "miniforge3/bin"))' >> "$mf" ;;
+        CLHEP)
+            cat >> "$mf" <<'LUA'
+setenv("CLHEP_DIR", root)
+setenv("CLHEP_BASE", root)
+prepend_path("LD_LIBRARY_PATH", pathJoin(root, "lib"))
+prepend_path("CMAKE_PREFIX_PATH", root)
+LUA
+            ;;
+        ROOT)
+            cat >> "$mf" <<'LUA'
+source_sh("bash", pathJoin(root, "bin/thisroot.sh"))
+prepend_path("CMAKE_PREFIX_PATH", root)
+LUA
+            ;;
+        GEANT4)
+            cat >> "$mf" <<'LUA'
+setenv("GEANT4_DIR", root)
+source_sh("bash", pathJoin(root, "bin/geant4.sh"))
+prepend_path("CMAKE_PREFIX_PATH", root)
+LUA
+            ;;
+        LHAPDF)
+            cat >> "$mf" <<'LUA'
+setenv("LHAPDF_DIR", root)
+setenv("LHAPDF_DATA_PATH", pathJoin(root, "share/LHAPDF"))
+prepend_path("PATH", pathJoin(root, "bin"))
+prepend_path("LD_LIBRARY_PATH", pathJoin(root, "lib"))
+prepend_path("PYTHONPATH", pathJoin(root, "lib"))
+LUA
+            ;;
+        PYTHIA8)
+            cat >> "$mf" <<'LUA'
+setenv("PYTHIA8", root)
+setenv("PYTHIA8DATA", pathJoin(root, "share/Pythia8/xmldoc"))
+prepend_path("PATH", pathJoin(root, "bin"))
+prepend_path("LD_LIBRARY_PATH", pathJoin(root, "lib"))
+prepend_path("PYTHONPATH", pathJoin(root, "lib"))
+LUA
+            ;;
+        DELPHES)
+            cat >> "$mf" <<LUA
+depends_on("root")
+local dir = pathJoin(root, "Delphes-${version}")
+setenv("DELPHES_DIR", dir)
+prepend_path("PATH", dir)
+prepend_path("LD_LIBRARY_PATH", dir)
+prepend_path("ROOT_INCLUDE_PATH", pathJoin(dir, "external"))
+LUA
+            ;;
+        MADGRAPH)
+            cat >> "$mf" <<LUA
+local dir = pathJoin(root, "MG5_aMC_v${version}")
+setenv("MG5_DIR", dir)
+prepend_path("PATH", pathJoin(dir, "bin"))
+LUA
+            ;;
+        WHIZARD)
+            cat >> "$mf" <<'LUA'
+setenv("WHIZARD_DIR", root)
+prepend_path("PATH", pathJoin(root, "bin"))
+prepend_path("LD_LIBRARY_PATH", pathJoin(root, "lib"))
+LUA
+            ;;
+        CALCHEP)
+            cat >> "$mf" <<LUA
+local dir = pathJoin(root, "calchep-${version}")
+setenv("CALCHEP_DIR", dir)
+prepend_path("PATH", dir)
+LUA
+            ;;
+        HERWIG)
+            cat >> "$mf" <<LUA
+local dir = pathJoin(root, "herwig-${version}")
+setenv("HERWIG_DIR", dir)
+source_sh("bash", pathJoin(dir, "bin/activate"))
+LUA
+            ;;
+        MADANALYSIS)
+            cat >> "$mf" <<LUA
+depends_on("root")
+local dir = pathJoin(root, "madanalysis5-${version}")
+setenv("MA5_DIR", dir)
+prepend_path("PATH", pathJoin(dir, "bin"))
+LUA
+            ;;
+        RIVET)
+            echo 'source_sh("bash", pathJoin(root, "rivetenv.sh"))' >> "$mf" ;;
+        CHECKMATE)
+            cat >> "$mf" <<LUA
+depends_on("root")
+local dir = pathJoin(root, "checkmate2-${version}")
+setenv("CHECKMATE_DIR", dir)
+prepend_path("PATH", pathJoin(dir, "bin"))
+LUA
+            ;;
+        PYHF|SPEY|CONTUR)
+            echo 'prepend_path("PATH", pathJoin(root, "pyhep-venv/bin"))' >> "$mf" ;;
+    esac
+    print_success "modulefile: $mf"
+}
+
+# Generate modulefiles for every installed package + a `hepstack` meta-module.
+generate_modulefiles() {
+    print_info "Generating Lmod modulefiles under $MODULES_DIR ..."
+    mkdir -p "$MODULES_DIR"
+
+    local i=0 written=""
+    while [ "$i" -lt "${#PKG_KEYS[@]}" ]; do
+        local key="${PKG_KEYS[$i]}"
+        local vervar="${key}_VERSION"
+        if pkg_is_installed "$key"; then
+            # hep-stats is shared by pyhf/spey/contur — only write it once.
+            local name; name=$(module_name "$key")
+            case " $written " in
+                *" $name "*) : ;;
+                *) write_modulefile "$key" "${PKG_LABELS[$i]}" "${!vervar:-latest}"
+                   written="$written $name" ;;
+            esac
+        fi
+        i=$((i + 1))
+    done
+
+    # Meta-module: `module load hepstack` pulls in the whole installed stack.
+    mkdir -p "$MODULES_DIR/hepstack"
+    {
+        echo 'help([[hepStack — full phenomenology stack]])'
+        echo 'whatis("hepStack meta-module: loads the full installed stack")'
+        local seen=""
+        for key in "${PKG_KEYS[@]}"; do
+            if pkg_is_installed "$key"; then
+                local n; n=$(module_name "$key")
+                case " $seen " in *" $n "*) : ;; *) echo "depends_on(\"$n\")"; seen="$seen $n";; esac
+            fi
+        done
+    } > "$MODULES_DIR/hepstack/1.0.lua"
+    print_success "meta-module: $MODULES_DIR/hepstack/1.0.lua"
+
+    register_modulepath
+}
+
+# Make MODULEPATH discoverable. For a standalone/user install we append a
+# `module use` line to the shell rc; for a system-wide install use the
+# /etc/profile.d snippet printed by the post-install summary instead.
+register_modulepath() {
+    local line="module use \"$MODULES_DIR\""
+    local shell_rc="$HOME/.bashrc"
+    case "$SHELL" in *zsh) shell_rc="$HOME/.zshrc" ;; esac
+    [ -f "$shell_rc" ] || touch "$shell_rc"
+    if ! grep -qF "$line" "$shell_rc" 2>/dev/null; then
+        echo "$line" >> "$shell_rc"
+        print_info "Added to $shell_rc: $line"
+    fi
+}
+
 # Main installation routine
 main() {
     # Recompute prefix-derived paths: -p/--prefix may have changed INSTALL_PREFIX
     # after the top-level assignments ran.
     MAMBA_ROOT="$INSTALL_PREFIX/miniforge3"
     PYHEP_VENV="$INSTALL_PREFIX/pyhep-venv"
+    MODULES_DIR="$INSTALL_PREFIX/modulefiles"
 
     print_ascii_art
     select_packages
@@ -1156,10 +1356,12 @@ main() {
     BUILD_DIR=$(cd "$BUILD_DIR" && pwd -P)
     MAMBA_ROOT="$INSTALL_PREFIX/miniforge3"
     PYHEP_VENV="$INSTALL_PREFIX/pyhep-venv"
+    MODULES_DIR="$INSTALL_PREFIX/modulefiles"
 
     # Make freshly-installed tools discoverable to later builds in this same run
-    # (root-config, lhapdf-config, pythia8 headers, etc.). Persistent shell
-    # exports are still written via add_to_shell for future sessions.
+    # (root-config, lhapdf-config, pythia8 headers, etc.). Persistent environment
+    # is delivered afterwards via generated modulefiles (or ~/.bashrc when
+    # --no-modules is given).
     export PATH="$INSTALL_PREFIX/bin:$PATH"
     export LD_LIBRARY_PATH="$INSTALL_PREFIX/lib:${LD_LIBRARY_PATH:-}"
     export DYLD_LIBRARY_PATH="$INSTALL_PREFIX/lib:${DYLD_LIBRARY_PATH:-}"
@@ -1249,6 +1451,11 @@ main() {
         install_contur
     fi
 
+    # Deliver the environment: modulefiles (default) or shell rc (--no-modules).
+    if [ "$USE_MODULES" -eq 1 ]; then
+        generate_modulefiles
+    fi
+
     # Final summary
     echo
     print_success "Installation completed!"
@@ -1276,9 +1483,28 @@ main() {
     [ "$INSTALL_CONTUR" -eq 1 ] && echo "✓ Contur ${CONTUR_VERSION:-latest}"
     echo
     print_info "Next steps:"
-    echo "1. Restart your terminal or run: source ~/.bashrc"
-    echo "2. Verify installation by running: root --version"
-    echo "3. Test Geant4: geant4-config --version"
+    if [ "$USE_MODULES" -eq 1 ]; then
+        echo "Environment is delivered via Lmod modulefiles in:"
+        echo "    $MODULES_DIR"
+        echo
+        echo "1. Make sure Lmod is installed (module command available):"
+        echo "     Debian/Ubuntu: sudo apt install lmod   |   RHEL/Fedora: sudo dnf install Lmod"
+        echo "     macOS: brew install lmod"
+        echo "2. Expose the modules (a 'module use' line was added to your shell rc):"
+        echo "     module use \"$MODULES_DIR\""
+        echo "   System-wide instead: create /etc/profile.d/z00-hepstack.sh containing that line."
+        echo "3. Load and verify:"
+        echo "     module avail"
+        echo "     module load hepstack        # or: module load root pythia8 delphes"
+        echo "     root --version ; geant4-config --version"
+        echo
+        echo "Users can add their own software under \$HOME/hepstack/modulefiles and run"
+        echo "  'module use \$HOME/hepstack/modulefiles' to layer it on top of this stack."
+    else
+        echo "1. Restart your terminal or run: source ~/.bashrc"
+        echo "2. Verify installation by running: root --version"
+        echo "3. Test Geant4: geant4-config --version"
+    fi
     echo
     print_warning "If you encounter issues, set DEBUG=1 and rerun for verbose output"
 }
@@ -1297,6 +1523,8 @@ while [ $# -gt 0 ]; do
             echo "  -h, --help         Show this help message"
             echo "  -y, --yes, --all   Skip the interactive menu; install everything selected"
             echo "  -f, --force        Rebuild even if a package is already installed"
+            echo "  --no-modules       Deliver env via ~/.bashrc instead of Lmod modulefiles"
+            echo "  --gen-modules      (Re)generate modulefiles for what's installed, then exit"
             echo "  --no-mamba        Skip Miniforge/mamba (use system python3 instead)"
             echo "  --no-root         Skip ROOT installation"
             echo "  --no-geant4       Skip Geant4 installation"
@@ -1331,6 +1559,17 @@ while [ $# -gt 0 ]; do
         -f|--force)
             FORCE_REINSTALL=1
             shift
+            ;;
+        --no-modules)
+            USE_MODULES=0
+            shift
+            ;;
+        --gen-modules)
+            MAMBA_ROOT="$INSTALL_PREFIX/miniforge3"
+            PYHEP_VENV="$INSTALL_PREFIX/pyhep-venv"
+            MODULES_DIR="$INSTALL_PREFIX/modulefiles"
+            generate_modulefiles
+            exit 0
             ;;
         --no-root)
             INSTALL_ROOT=0

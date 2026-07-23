@@ -151,12 +151,48 @@ MuonToolKits/
 └── patch/                     # Optional patches
 ```
 
+## 🧩 Environment modules (Lmod)
+
+By default the installer does **not** edit your shell rc. Instead it generates
+Lmod `.lua` modulefiles under `<prefix>/modulefiles`, one per installed package
+plus a `hepstack` meta-module. This is the recommended setup for a shared /
+system-wide install: environment is loaded on demand and users can layer their
+own software on top.
+
+```bash
+# after installation
+module use "<prefix>/modulefiles"      # a matching line is added to your shell rc
+module avail
+module load hepstack                    # the whole stack
+module load root pythia8 delphes        # or pick tools
+```
+
+- **Prereq:** an `Lmod` install (`apt install lmod` / `dnf install Lmod` /
+  `brew install lmod`). Modulefiles are Tcl-compatible Lua; ROOT, Geant4, Rivet
+  and Herwig wrap their setup scripts via Lmod's `source_sh`.
+- **System-wide MODULEPATH:** create `/etc/profile.d/z00-hepstack.sh` containing
+  `module use /opt/hepstack/modulefiles` (root install to `/opt/hepstack`).
+- **User custom software:** put your own `<name>/<version>.lua` under
+  `$HOME/hepstack/modulefiles` and run `module use $HOME/hepstack/modulefiles` —
+  it is searched alongside (and can override) the system stack.
+- **Regenerate** modulefiles for an existing install without rebuilding:
+  ```bash
+  INSTALL_PREFIX=/opt/hepstack ./starterpack.sh --gen-modules
+  ```
+- **Opt out:** `./starterpack.sh --no-modules` falls back to writing `export`
+  lines into `~/.bashrc` (the older behavior).
+
 ## 🧪 Verification
 
 ```bash
-source ~/.bashrc
+# modulefiles (default)
+module load hepstack
 root --version
 geant4-config --version
+
+# or, if installed with --no-modules
+source ~/.bashrc
+root --version
 ```
 
 ## 🔄 Updates
